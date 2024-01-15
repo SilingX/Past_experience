@@ -136,7 +136,3 @@ streaming_classifier = function(wave_file,
   return(paste(predicted_labels, collapse = ""))
 }## end function
 ```
-
-```{r}
-streaming_classifier(wave_file = readWave('LLL_z.wav'))
-```
