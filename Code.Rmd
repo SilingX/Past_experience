@@ -1,0 +1,189 @@
+---
+title: "Code"
+author: "Siling Xiao"
+output:
+  html_document:
+    fig_caption: true
+    number_sections: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    code_folding: hide
+    code_download: true
+    table-of-contents: true
+    
+---
+
+```{r, message=FALSE}
+library(ggthemes)
+library(tidyverse)
+library(class)
+library(cvTools)
+library(ggplot2)
+library(e1071)
+library(glmnet)
+library(EBImage)
+library(tuneR)
+library(randomForest)
+```
+
+# Write a while loop that prints out standard random normal numbers (use rnorm()) but stops (breaks) when the absolute distance to the previous value is greater than 2.
+
+```{r}
+old = 1
+while (TRUE)
+{
+  x = rnorm(1)
+  print(x)
+  if (abs(x-old)>2){
+    break
+  }
+  old <- x
+}
+```
+
+
+# Image analysis
+
+## (a) How many images are there? How many cells belong to each of the classes?
+
+```{r}
+load('imgData.RData')
+length(imgList)
+table(imgLabels)
+```
+
+- There are 86 images. 44 cells belong to Class ClusterA and 42 cells belong to Class ClusterB.
+
+
+
+## (b) Using a single repeat, perform a 5-fold cross-validation of a random forest classifier using the extracted pixel image data. How many cells are misclassified?
+
+```{r}
+imgList_resized = lapply(imgList, EBImage::resize, h = 50, w = 50)
+imgPixels = do.call(cbind, lapply(imgList_resized, c))
+```
+
+```{r}
+set.seed(3888)
+cvSets = cvFolds(length(imgLabels), 5)
+res <- c()
+for (k in 1:5) {
+  y_train = imgLabels[cvSets$which != k]
+  X_train = t(imgPixels[,cvSets$which != k])
+  y_test = imgLabels[cvSets$which == k]
+  X_test = t(imgPixels[,cvSets$which == k])
+  rf = randomForest(x = X_train, y = y_train,
+                    xtest = X_test, ytest = y_test)
+  res[k] <- sum(rf$test$predicted != y_test)
+}
+sum(res)
+```
+
+- 21 cells are misclassified.
+
+# Financial Time Series 
+
+## (a) Calculate the Weighted Average Price (WAP) and add it as a column to the data.
+
+```{r, message=FALSE}
+library(DT)
+library(dplyr)
+library(limma)
+library(Biobase)
+library(ggplot2)
+library(tidyr)
+```
+
+
+```{r}
+stock2 <- read.csv('stock_2_time_id_11.csv') 
+stock2 <- stock2 %>%
+  mutate(WAP = (bid_price1*ask_size1 + ask_price1*bid_size1)/(ask_size1 + bid_size1))
+head(stock2)
+```
+
+
+## (b) Recall `time_id == 11` corresponds to a 10-min time bucket. First, divide this 10-min time bucket into non-overlapping 30-second intervals. Calculate the realised volatility for each 30-second interval. Then, calculate the realised volatility for 10 second intervals. Plot these two series on the same graph. 
+
+```{r}
+comp_vol <- function(x) sqrt(sum(x^2))
+sec <- stock2 %>% pull(seconds_in_bucket)
+log.r = data.frame(time = sec[-1],
+                   log_return = log(stock2$WAP[-1]/stock2$WAP[-length(stock2$WAP)]))
+log.r <- log.r %>% mutate(time_bucket10 = ceiling(time/10),
+                          time_bucket30 = ceiling(time/30))
+vol10 <- aggregate(log_return ~ time_bucket10, data = log.r, FUN = comp_vol)
+vol30 <- aggregate(log_return ~ time_bucket30, data = log.r, FUN = comp_vol)
+
+colnames(vol10)[2] <- 'volatility'
+colnames(vol30)[2] <- 'volatility'
+
+bind_rows(left_join(log.r, vol10) %>% 
+  mutate(class = '10-second intervals'),
+  left_join(log.r, vol30) %>% 
+  mutate(class = '30-second intervals')) %>%
+  ggplot(aes(x = time, y = volatility, col = class)) +
+  geom_line() +
+  theme_bw() +
+  labs(col = '')
+```
+
+# Fairness in ML
+
+A data science firm has been utilising an AI system called `ResumAIte` that uses job candidate resumes to predict if the candidate is likely to be skilled enough for the job. The candidates' skill, $Y$, is a binary random variable, which is equal to $1$, if the job candidate can complete the coding task. The system `resumAIte` generates a score $C(x) \in [0, 1]$ based on a number of covariates $x$ where $C(x) = 1$ and $C(x) = 0$ represent acceptance and non-acceptance of job candidates for the roles respectively.
+
+One of the covariates includes the University each candidate last graduated from. In this context, let's consider that University (e.g. less or more prestigious) is a sensitive or protected attribute, $A$, that takes the value $A = 0$ for University 1 and $A = 1$ for University 2. Data on successful coding task completion and job acceptance score was collected from the system and the corresponding confusion table is shown below:
+
+ |  | | $A=0$ (University 1) || $A=1$ (University 2) |
+------------- | ------------- | ------------- | -------------| ------------- | -------------
+ |  | |$C(x) = 1$ |$C(x) = 0$ |$C(x) = 1$  |$C(x) = 0$ 
+Completed coding task| $Y=1$ | 55 | 12 | 31 | 44
+ || $Y=0$ | 28 | 180 | 17 | 302 
+
+Show all values to 2 decimal points for this question.
+
+## (a) Calculate positive predictive parity
+With respect to the protected attribute, $A$, determine if the AI system 'ResumAIte' is a fair algorithm using the fairness criteria `positive predictive parity`.
+
+```{r}
+# University 1
+TP1 <- 55
+FP1 <- 28
+PPP1 <- TP1 / (TP1 + FP1)
+
+# University 2
+TP2 <- 31
+FP2 <- 17
+PPP2 <- TP2 / (TP2 + FP2)
+
+cat("Positive predictive parity for University 1:", round(PPP1, 2), "\n")
+cat("Positive predictive parity for University 2:", round(PPP2, 2), "\n")
+```
+
+- The positive predictive parity for University 1: 0.66 and for University 2 is 0.65. So it is fair algorithm.
+
+## (b) Calculate equalized odds
+With respect to the protected attribute, $A$, determine if the AI system `ResumAIte` is a fair algorithm using the fairness criteria `equalized odds` (also known as "equal opportunity"). Is this consistent with your conclusion from `positive predictive parity`? Explain why or why not.
+
+```{r}
+# University 1
+FN1 <- 12
+TN1 <- 180
+TPR1 <- TP1 / (TP1 + FN1)
+FPR1 <- FP1 / (FP1 + TN1)
+
+# University 2
+FN2 <- 44
+TN2 <- 302
+TPR2 <- TP2 / (TP2 + FN2)
+FPR2 <- FP2 / (FP2 + TN2)
+
+cat("True positive rate for University 1:", round(TPR1, 2), "\n")
+cat("True positive rate for University 2:", round(TPR2, 2), "\n")
+cat("False positive rate for University 1:", round(FPR1, 2), "\n")
+cat("False positive rate for University 2:", round(FPR2, 2), "\n")
+```
+- The true positive rates (TPR) and false positive rates (FPR) are not equal for the two universities. This indicates that the AI system 'ResumAIte' is not fair according to the equalized odds (equal opportunity) criterion.
+
+Comparing this result with the conclusion from the positive predictive parity (PPP) calculation, we observe that the conclusions are not consistent. While the PPP criterion suggested fairness, the equalized odds criterion suggests unfairness. This discrepancy highlights the importance of considering multiple fairness criteria when evaluating the fairness of an AI system, as different criteria may lead to different conclusions.
