@@ -1,0 +1,142 @@
+---
+title: "Coding"
+author: "Siling Xiao"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_download: no
+    table-of-contents: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+# Create an informative map visualisation
+
+```{r,message=FALSE}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(viridis)
+
+```
+
+
+```{r, message=FALSE}
+# Set the seed
+set.seed(4000)
+
+reef_data <- read.csv("Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv")
+world_map <- map_data('world')
+
+ggplot()+geom_polygon(data =world_map, aes(x=long, y = lat, group = group), fill="grey", alpha=0.3) + 
+  geom_point(data = reef_data, aes(x = Longitude.Degrees, y = Latitude.Degrees, color = Average_bleaching, size = Average_bleaching), alpha = 0.7) + 
+  scale_color_viridis(option = "plasma", direction = -1, name = "Avg Bleaching (%)") + coord_sf(xlim = c(-180, 180), ylim = c(-60, 60), expand = FALSE) +
+  theme_minimal() + 
+  theme(legend.position = "bottom") +
+  ggtitle("Coral Bleaching Events (1998-2017)")
+
+```
+
+# Which genes are overlapped between the top 300 differentially expressed genes for each dataset?
+
+```{r, warning=FALSE, message=FALSE}
+rm(list = ls())
+library(DT)
+library(dplyr)
+library(limma)
+library(Biobase)
+library(ggplot2)
+library(tidyr)
+load("GSE138043.RData")
+eMat043 <- exprs(gse)
+featureData043 <- fData(gse)
+Outcome043 <- ifelse(grepl(pattern = 'non-AR', x = gse$characteristics_ch1), 
+                     'Stable', 'Rejection') 
+get_symbol <- function(x){
+  sym <- lapply(x, FUN = function(xs) strsplit(xs, split = ' // ')[[1]][2])
+  unlist(sym)
+}
+featureData043[,'Gene Symbol'] <- get_symbol(featureData043$gene_assignment)
+
+design043 <- model.matrix(~ Outcome043)
+fit043 <- lmFit(eMat043, design043)
+fit043 <- eBayes(fit043)
+tab043 <- topTable(fit043, genelist = featureData043[,'Gene Symbol'], n = 300)
+```
+
+```{r, warning=FALSE, message=FALSE}
+load('GSE46474.RData')
+Outcome474 <- ifelse(grepl(pattern = 'AR', x = gse$title), 'Rejection', 'Stable') 
+eMat474 <- exprs(gse)
+featureData474 <- fData(gse)
+design474 <- model.matrix(~ Outcome474)
+fit474 <- lmFit(eMat474, design474)
+fit474 <- eBayes(fit474)
+tab474 <- topTable(fit474, genelist = featureData474[,'Gene Symbol'], n = 300)
+```
+
+```{r}
+intersect(tab043$ID, tab474$ID)
+```
+
+# Build a function which will take a sequence of signals as an input.
+
+```{r, warning=FALSE, message=FALSE}
+rm(list = ls())
+library(tuneR) 
+library(tidyverse)
+```
+
+```{r}
+LR_detection <- function(seq) {
+  maxval <- which.max(na.omit(seq))
+  minval <- which.min(na.omit(seq))
+  movement <- ifelse(maxval < minval,  "L", "R")
+  return(movement)
+}
+```
+
+```{r}
+streaming_classifier = function(wave_file,  
+                                window_size = wave_file@samp.rate,
+                                increment = window_size/3,
+                                thresholdEvents = 50, p = 3
+) {
+  Y = wave_file@left
+  xtime = seq_len(length(wave_file@left))/wave_file@samp.rate 
+  increment = increment*3/p
+  predicted_labels = c()
+  lower_interval = 1
+  max_time = max(xtime)*window_size
+  
+  while(max_time > lower_interval + window_size)
+  {
+    upper_interval = lower_interval + window_size
+    interval = Y[lower_interval:upper_interval]
+    
+    testStat = sum(interval[1:(length(interval) - 1)] * interval[2:(length(interval))] <= 0)
+    if (testStat < thresholdEvents) {
+      predicted = LR_detection(interval)
+      predicted_labels = c(predicted_labels, predicted)
+    lower_interval <- lower_interval + window_size
+    } else {
+      lower_interval <- lower_interval + increment
+    }
+  } ## end while 
+  
+  return(paste(predicted_labels, collapse = ""))
+}## end function
+```
+
+```{r}
+streaming_classifier(wave_file = readWave('LLL_z.wav'))
+```
